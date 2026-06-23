@@ -1,8 +1,10 @@
 import os
+import time
 import pickle
 import logging
 import numpy as np
 import pandas as pd
+import psutil
 from datetime import datetime
 
 from sklearn.ensemble import RandomForestClassifier
@@ -53,6 +55,9 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 log.info(f"Train: {len(X_train):,} filas | Test: {len(X_test):,} filas")
 
+# Iniciar monitoreo de recursos desde el preprocesamiento
+proceso = psutil.Process(os.getpid())
+
 # ── 4. PREPROCESAMIENTO ─────────────────────────────────────────────
 # Columnas numéricas → StandardScaler (lleva todo a la misma escala)
 # Columnas categóricas → OneHotEncoder (convierte texto en números)
@@ -64,14 +69,17 @@ numericas = [
 ]
 categoricas = ["merchant", "category", "gender", "city", "state", "job"]
 
+# sparse_output=True → guarda solo los valores no-cero (ahorra RAM significativamente)
+# Se convierte a denso (.toarray()) solo justo antes de SMOTE y del modelo
 preprocesador = ColumnTransformer(transformers=[
     ("num", StandardScaler(), numericas),
-    ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=False), categoricas)
+    ("cat", OneHotEncoder(handle_unknown="ignore", sparse_output=True), categoricas)
 ])
 
 log.info("Preprocesando features...")
-X_train_proc = preprocesador.fit_transform(X_train)
-X_test_proc  = preprocesador.transform(X_test)  # solo transform, nunca fit
+X_train_proc = preprocesador.fit_transform(X_train).toarray()
+X_test_proc  = preprocesador.transform(X_test).toarray()  # solo transform, nunca fit
+log.info(f"RAM tras preprocesamiento: {proceso.memory_info().rss / 1024 / 1024:.1f} MB")
 
 # ── 5. SMOTE — BALANCEAR EL DATASET DE ENTRENAMIENTO ───────────────
 # IMPORTANTE: SMOTE solo se aplica al train, NUNCA al test
@@ -88,22 +96,47 @@ log.info(f"Distribución después de SMOTE: "
 # ── 6. ENTRENAR RANDOM FOREST ───────────────────────────────────────
 log.info("Entrenando Random Forest — esto puede tomar unos minutos...")
 
+# Capturar recursos ANTES del entrenamiento
+ram_antes_mb   = proceso.memory_info().rss / 1024 / 1024
+cpu_antes      = psutil.cpu_percent(interval=1)
+tiempo_inicio  = time.time()
+
+# Usar solo la mitad de los núcleos disponibles para no saturar el sistema
+n_jobs_optimo = max(1, psutil.cpu_count(logical=False) // 2)
+log.info(f"CPUs físicos disponibles: {psutil.cpu_count(logical=False)} — usando {n_jobs_optimo}")
+
 modelo = RandomForestClassifier(
-    n_estimators=200,       # 200 árboles votando
-    max_depth=15,           # profundidad máxima de cada árbol
-    min_samples_leaf=4,     # mínimo de registros en cada hoja
-    class_weight="balanced",# doble protección junto a SMOTE
+    n_estimators=200,           # 200 árboles votando
+    max_depth=15,               # profundidad máxima de cada árbol
+    min_samples_leaf=4,         # mínimo de registros en cada hoja
+    class_weight="balanced",    # doble protección junto a SMOTE
     random_state=42,
-    n_jobs=-1               # usa todos los núcleos del procesador
+    n_jobs=n_jobs_optimo        # solo mitad de núcleos — optimización CPU
 )
 modelo.fit(X_train_bal, y_train_bal)
+
+# Capturar recursos DESPUÉS del entrenamiento
+tiempo_fin       = time.time()
+ram_despues_mb   = proceso.memory_info().rss / 1024 / 1024
+cpu_despues      = psutil.cpu_percent(interval=1)
+tiempo_entreno_s = round(tiempo_fin - tiempo_inicio, 2)
+ram_usada_mb     = round(ram_despues_mb - ram_antes_mb, 2)
+
 log.info("Entrenamiento completado")
+log.info(f"  Tiempo de entrenamiento : {tiempo_entreno_s} segundos")
+log.info(f"  RAM antes               : {ram_antes_mb:.1f} MB")
+log.info(f"  RAM después             : {ram_despues_mb:.1f} MB")
+log.info(f"  RAM consumida           : {ram_usada_mb} MB")
+log.info(f"  CPU al terminar         : {cpu_despues}%")
 
 # ── 7. EVALUACIÓN ───────────────────────────────────────────────────
 log.info("Evaluando sobre el conjunto de test...")
 
+# Medir tiempo de predicción (cuánto tarda en evaluar el set de test)
+t_pred_inicio = time.time()
 y_prob = modelo.predict_proba(X_test_proc)[:, 1]
 y_pred = (y_prob >= 0.5).astype(int)
+tiempo_prediccion_s = round(time.time() - t_pred_inicio, 4)
 
 # Métricas principales
 roc_auc = roc_auc_score(y_test, y_prob)
@@ -117,19 +150,32 @@ log.info(f"PR-AUC  : {pr_auc:.4f}")
 fecha = datetime.now().strftime("%Y-%m-%d")
 ruta_modelo = f"models/fraud_model_{fecha}.pkl"
 
+pipeline_completo = {
+    "modelo"        : modelo,
+    "preprocesador" : preprocesador
+}
 with open(ruta_modelo, "wb") as f:
-    pickle.dump(modelo, f)
-log.info(f"Modelo guardado en: {ruta_modelo}")
+    pickle.dump(pipeline_completo, f)
+log.info(f"Modelo + preprocesador guardados en: {ruta_modelo}")
 
 # Reporte de métricas en CSV
 reporte = pd.DataFrame([{
-    "fecha"          : fecha,
-    "roc_auc"        : round(roc_auc, 4),
-    "pr_auc"         : round(pr_auc, 4),
-    "n_train"        : len(X_train),
-    "n_test"         : len(X_test),
-    "fraudes_test"   : int(y_test.sum()),
-    "fraudes_detectados": int((y_pred == 1).sum())
+    # Métricas del modelo
+    "fecha"                  : fecha,
+    "roc_auc"                : round(roc_auc, 4),
+    "pr_auc"                 : round(pr_auc, 4),
+    "n_train"                : len(X_train),
+    "n_test"                 : len(X_test),
+    "fraudes_test"           : int(y_test.sum()),
+    "fraudes_detectados"     : int((y_pred == 1).sum()),
+    # Métricas de rendimiento (recursos)
+    "tiempo_entrenamiento_s" : tiempo_entreno_s,
+    "tiempo_prediccion_s"    : tiempo_prediccion_s,
+    "ram_antes_mb"           : round(ram_antes_mb, 1),
+    "ram_despues_mb"         : round(ram_despues_mb, 1),
+    "ram_consumida_mb"       : ram_usada_mb,
+    "cpu_pct_al_terminar"    : cpu_despues,
+    "n_cpus_disponibles"     : psutil.cpu_count(),
 }])
 reporte.to_csv("data/reports/reporte_modelo.csv", index=False)
 log.info("✓ Reporte guardado en data/reports/reporte_modelo.csv")
