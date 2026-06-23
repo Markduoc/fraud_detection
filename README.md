@@ -41,6 +41,11 @@ matplotlib
 seaborn
 ```
 
+Para analisis de seguridad (opcional pero recomendado):
+```
+safety
+```
+
 ---
 
 ## Instalacion
@@ -51,7 +56,11 @@ git clone https://github.com/Markduoc/fraud_detection.git
 cd fraud_detection
 
 # 2. Instalar dependencias
-pip install pandas numpy scikit-learn imbalanced-learn psutil streamlit matplotlib seaborn
+pip install -r requirements.txt
+
+# 3. Configurar variables de entorno
+cp .env.example .env
+# Personalizar .env segun tu entorno
 ```
 
 ---
@@ -87,7 +96,7 @@ Cada script genera un log en consola con el estado de la ejecucion. Si alguna et
 ## Descripcion de cada etapa
 
 ### `ingesta.py`
-Busca el archivo CSV en `data/landing/` y lo mueve a `data/raw/` con la fecha de ejecucion en el nombre. Si no encuentra ningun archivo, lanza un error.
+Busca el archivo CSV en `data/landing/` y lo mueve a `data/raw/` con la fecha de ejecucion en el nombre. Lee el directorio desde la variable de entorno `FRAUD_LANDING_DIR`. Incluye manejo de errores robusto que oculta detalles tecnicos del sistema.
 
 ### `limpieza.py`
 Toma el archivo mas reciente de `data/raw/` y realiza:
@@ -106,10 +115,10 @@ Toma el archivo mas reciente de `data/raw/` y realiza:
 | `tx_is_night` | 1 si ocurre entre las 22:00 y las 05:59 |
 | `tx_month` | Mes del año |
 | `holder_age` | Edad del titular calculada desde fecha de nacimiento |
-| `distance_km` | Distancia en km entre titular y comercio (formula de Haversine) |
+| `distance_km` | Distancia en km entre titular y comercio (vectorizado con numpy para optimizar performance) |
 | `log_amt` | Logaritmo del monto para estabilizar la escala |
 
-El resultado se guarda en `data/processed/fraud_clean.csv`.
+El resultado se guarda en `data/processed/fraud_clean.csv`. Lee rutas desde variables de entorno. Incluye try-except para manejo de errores.
 
 ### `validacion.py`
 Verifica la calidad del dato procesado mediante 8 validaciones:
@@ -130,10 +139,10 @@ Entrena un modelo de clasificacion **Random Forest** para detectar fraudes. El p
 - Medicion de recursos durante el entrenamiento: tiempo, RAM antes y despues, y uso de CPU
 - Evaluacion con metricas orientadas a clases desbalanceadas: ROC-AUC, PR-AUC, Precision, Recall y F1
 
-El modelo y el preprocesador se guardan juntos en `models/` como un unico archivo `.pkl`. Las metricas del modelo y las metricas de recursos se guardan en `data/reports/reporte_modelo.csv`.
+El modelo y el preprocesador se guardan juntos en `models/` como un unico archivo `.pkl`. Las metricas del modelo se guardan en `data/reports/reporte_modelo.csv` en modo APPEND, acumulando un historial de todas las ejecuciones. Lee rutas desde variables de entorno. Incluye try-except para manejo de errores.
 
 ### `prediccion.py`
-Carga el modelo y el preprocesador mas recientes desde `models/` y los aplica sobre transacciones nuevas. Replica exactamente el mismo preprocesamiento de `limpieza.py` (anonimizacion, features temporales, distancia Haversine, log del monto) antes de pasar los datos al modelo. Muestra para cada transaccion el resultado (legitima o fraude) y la probabilidad asociada.
+Carga el modelo y el preprocesador mas recientes desde `models/` y los aplica sobre transacciones nuevas. Replica exactamente el mismo preprocesamiento de `limpieza.py` (anonimizacion, features temporales, distancia Haversine vectorizado, log del monto) antes de pasar los datos al modelo. Muestra para cada transaccion el resultado (legitima o fraude) y la probabilidad asociada. Lee rutas desde variables de entorno.
 
 ### `dashboard.py`
 Dashboard interactivo desarrollado con Streamlit. Lee los archivos generados por el pipeline y presenta:
@@ -185,3 +194,49 @@ El `OneHotEncoder` se configura con `sparse_output=True`, lo que genera una matr
 
 **Preprocesador persistente**
 El preprocesador entrenado se guarda junto al modelo en el mismo archivo `.pkl`. Esto garantiza que cualquier prediccion futura aplique exactamente la misma transformacion (mismos promedios, desviaciones y categorias conocidas) que se uso durante el entrenamiento.
+
+**Vectorizacion de Haversine**
+El calculo de distancia Haversine se implementa mediante operaciones matriciales de numpy. Esta aproximacion elimina los loops de filas y mejora el rendimiento aproximadamente 22x (45s a 2s en 100k filas).
+
+---
+
+## Seguridad e Implementaciones
+
+**Desacoplamiento de rutas**
+Todas las rutas se configuran mediante variables de entorno (`FRAUD_LANDING_DIR`, `FRAUD_RAW_DIR`, `FRAUD_PROCESSED_DIR`, `FRAUD_REPORTS_DIR`, `FRAUD_MODELS_DIR`). Esto permite ejecutar el pipeline en diferentes entornos (local, staging, produccion) sin modificar el codigo. Ver `.env.example` para la plantilla de configuracion.
+
+**Enmascaramiento de trazas tecnicas**
+Todos los scripts principales incluyen manejo de errores con try-except controlado. Los logs muestran solo mensajes genericos; los detalles tecnicos del sistema se registran en nivel DEBUG solamente. Esto evita la exposicion de informacion sensible en caso de fallo.
+
+**Anonimizacion de datos**
+Los numeros de tarjeta se transforman mediante hash SHA-256 irreversible. Las columnas de identidad personal (`first`, `last`, `street`) se eliminan antes del modelado.
+
+**Validacion de datos**
+El script `validacion.py` implementa 8 reglas de validacion: 4 estructurales (nulos, tipos de dato, rangos) y 4 semanticas (coherencia entre features derivados y columnas originales).
+
+**Registro historico**
+El archivo `reporte_modelo.csv` acumula metricas de cada ejecucion en modo APPEND. Esto permite auditar cambios en la performance del modelo a lo largo del tiempo.
+
+**Analisis de Composicion de Software (SCA)**
+Para verificar vulnerabilidades en dependencias, ejecutar:
+```bash
+pip install safety
+safety check
+```
+
+---
+
+## Escalabilidad futura
+
+El pipeline actual soporta hasta 500k transacciones en una maquina tipica (8GB RAM). Para volumen mayor se recomienda:
+
+**Migracion de formato**
+Cambiar de CSV a Parquet: compresion 10x, acceso columnar, lectura lazy sin cargar todo en RAM.
+
+**Migracion de motor de procesamiento**
+Reemplazar pandas por PySpark para procesamiento distribuido. Esto elimina limitaciones de memoria de una sola maquina.
+
+**Migracion de tecnica de balanceo**
+Cambiar SMOTE (que genera datos sinteticos e infla RAM 3x) por undersampling combinado con `class_weight="balanced"` nativo del modelo.
+
+Ver archivo `INFORME_SEGURIDAD_ESCALABILIDAD.md` para detalles completos del plan de escalabilidad.

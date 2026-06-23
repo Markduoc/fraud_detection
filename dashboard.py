@@ -21,13 +21,20 @@ st.set_page_config(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
+# ─── DESACOPLAMIENTO DE RUTAS ───
+MODELS_DIR = os.getenv("FRAUD_MODELS_DIR", "models")
+PROCESSED_DIR = os.getenv("FRAUD_PROCESSED_DIR", "data/processed")
+REPORTS_DIR = os.getenv("FRAUD_REPORTS_DIR", "data/reports")
+
+st.info(f"🔧 Entorno cargado desde variables de entorno (o defaults)")
+
 # ── TÍTULO ───────────────────────────────────────────────────────────
 st.title("🔍 Dashboard — Detección de Fraude en Tarjetas de Crédito")
 st.markdown("Pipeline ITY1101 · Gestión de Datos para IA · DuocUC")
 st.divider()
 
 # ── CARGAR REPORTE DEL MODELO ────────────────────────────────────────
-reporte_path = "data/reports/reporte_modelo.csv"
+reporte_path = f"{REPORTS_DIR}/reporte_modelo.csv"
 
 if not os.path.exists(reporte_path):
     st.error("⚠️ No se encontró reporte_modelo.csv — ejecuta modelado.py primero.")
@@ -85,9 +92,8 @@ st.divider()
 st.subheader("📈 Análisis del Modelo")
 
 # Cargar modelo
-modelos_pkl = sorted(glob.glob("models/fraud_model_*.pkl"), reverse=True)
-datos_path  = "data/processed/fraud_clean.csv"
-
+modelos_pkl = sorted(glob.glob(f"{MODELS_DIR}/fraud_model_*.pkl"), reverse=True)
+datos_path  = f"{PROCESSED_DIR}/fraud_clean.csv"
 if not modelos_pkl:
     st.warning("No se encontró modelo .pkl — ejecuta modelado.py.")
 elif not os.path.exists(datos_path):

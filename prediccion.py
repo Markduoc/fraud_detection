@@ -16,8 +16,14 @@ log = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
+# ─── DESACOPLAMIENTO DE RUTAS ───
+MODELS_DIR = os.getenv("FRAUD_MODELS_DIR", "models")
+
+log.info(f"Configuración cargada desde entorno:")
+log.info(f"  MODELS_DIR: {MODELS_DIR}")
+
 # ── 1. CARGA EL MODELO MÁS RECIENTE ─
-archivos = sorted(glob.glob("models/fraud_model_*.pkl"), reverse=True)
+archivos = sorted(glob.glob(f"{MODELS_DIR}/fraud_model_*.pkl"), reverse=True)
 
 if not archivos:
     log.error("No se encontró ningún modelo — ejecuta modelado.py primero")
@@ -40,11 +46,13 @@ log.info("Modelo y preprocesador cargados exitosamente")
 def hashear(valor: str) -> str:
     return hashlib.sha256(str(valor).encode()).hexdigest()[:16]
 
-def haversine_km(lat1, lon1, lat2, lon2):
+def haversine_km_vectorized(lat1, lon1, lat2, lon2):
+    """Calcula distancia de Haversine de forma vectorizada."""
     R = 6371.0
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi       = np.radians(lat2 - lat1)
-    dlambda    = np.radians(lon2 - lon1)
+    phi1 = np.radians(lat1)
+    phi2 = np.radians(lat2)
+    dphi = np.radians(lat2 - lat1)
+    dlambda = np.radians(lon2 - lon1)
     a = np.sin(dphi/2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda/2)**2
     return R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
 
@@ -73,9 +81,10 @@ def preparar_transaccion(df_raw: pd.DataFrame) -> pd.DataFrame:
     dob = pd.to_datetime(df["dob"], dayfirst=True, errors="coerce")
     df["holder_age"] = (dt - dob).dt.days // 365
 
-    # Distancia titular
-    df["distance_km"] = haversine_km(
-        df["lat"], df["long"], df["merch_lat"], df["merch_long"]
+    # Distancia titular (vectorizado)
+    df["distance_km"] = haversine_km_vectorized(
+        df["lat"].values, df["long"].values,
+        df["merch_lat"].values, df["merch_long"].values
     )
 
     # Log del monto

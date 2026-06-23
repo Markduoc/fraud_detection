@@ -1,0 +1,125 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Requirements.txt - Dependencias del Pipeline de Detección de Fraude
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# INSTRUCCIONES DE USO:
+# 1. Crear entorno virtual: python -m venv venv
+# 2. Activar entorno:
+#    - Windows: .\venv\Scripts\Activate
+#    - Linux/Mac: source venv/bin/activate
+# 3. Instalar dependencias: pip install -r requirements.txt
+# 4. Verificar seguridad: pip install safety && safety check
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────
+# PROCESAMIENTO DE DATOS
+# ─────────────────────────────────────────────────────────────────────────
+
+# Análisis y manipulación de datos tabulares
+# ⚠️ Riesgo: Consume mucha RAM en datasets > 500MB
+# ✅ Mitigación: Vectorizar operaciones; usar Parquet para large files
+pandas>=1.5.0
+
+# Computación numérica y matricial
+# ✅ Recomendación: Mantener actualizado (optimizaciones de seguridad)
+numpy>=1.21.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# MACHINE LEARNING
+# ─────────────────────────────────────────────────────────────────────────
+
+# Algoritmos ML + preprocesamiento
+# ⚠️ Riesgo: No soporta distribución nativa (single machine)
+# ✅ Mitigación: Migrar a PySpark para datasets > 1M
+scikit-learn>=1.0.0
+
+# Técnicas para desbalance de clases (SMOTE, undersampling)
+# ⚠️ Riesgo: SMOTE genera datos sintéticos (infla RAM)
+# ✅ Mitigación: Cambiar a undersampling para datasets grandes
+imbalanced-learn>=0.10.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# VISUALIZACIÓN Y REPORTES
+# ─────────────────────────────────────────────────────────────────────────
+
+# Dashboard interactivo
+# ⚠️ Riesgo: Regenera UI en cada rerrun (ineficiente)
+# ✅ Mitigación: Usar @st.cache_data para cachear resultados
+streamlit>=1.0.0
+
+# Gráficos estáticos
+matplotlib>=3.5.0
+
+# Gráficos estadísticos
+# ✅ Recomendación: Construido sobre matplotlib
+seaborn>=0.11.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# MONITOREO Y LOGGING
+# ─────────────────────────────────────────────────────────────────────────
+
+# Lectura de métricas del sistema (RAM, CPU, procesos)
+# ✅ Recomendación: Mantener actualizado
+psutil>=5.9.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# SEGURIDAD (RECOMENDADO)
+# ─────────────────────────────────────────────────────────────────────────
+
+# Análisis de Composición de Software (SCA)
+# ✅ Escanea dependencias por vulnerabilidades conocidas
+# Uso: pip install safety && safety check
+# safety>=2.0.0  # Opcional pero RECOMENDADO
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEPENDENCIAS DE DESARROLLO (OPCIONAL)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Linting y análisis estático
+# pylint>=2.15.0
+# black>=22.0.0
+
+# Testing
+# pytest>=7.0.0
+# pytest-cov>=3.0.0
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FUTURO: PARA ESCALABILIDAD (v3.0+)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Procesamiento distribuido (reemplaza pandas)
+# pyspark>=3.0.0
+
+# CSV → Parquet (formato columnar comprimido)
+# pyarrow>=10.0.0
+
+# Polars (alternativa rápida a pandas)
+# polars>=0.17.0
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NOTAS DE SEGURIDAD
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# 1. VERIFICAR VULNERABILIDADES
+#    Después de instalar:
+#    $ safety check
+#
+# 2. ACTUALIZAR REGULARMENTE
+#    $ pip install --upgrade -r requirements.txt
+#    (Una vez al mes mínimo)
+#
+# 3. AUDITORÍA DE DEPENDENCIAS
+#    Listar todas las librerías instaladas:
+#    $ pip list
+#
+# 4. REPRODUCIBILIDAD
+#    Fijar versiones en producción:
+#    $ pip freeze > requirements-lock.txt
+#    Copiar requirements-lock.txt a producción
+#
+# 5. CONFLICTOS DE DEPENDENCIAS
+#    Si encuentras conflictos:
+#    $ pip check
+#
+# ═══════════════════════════════════════════════════════════════════════════
